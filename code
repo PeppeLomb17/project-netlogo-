@@ -1,0 +1,659 @@
+globals [
+
+  gdp
+  debt
+  pension-debt
+  gini
+  public-quality
+  debt-to-gdp
+  sustainable-growth
+  companies-born
+  companies-bankrupt
+  cumulative-born
+  cumulative-bankrupt
+  inflation
+  base-birth-rate
+  base-death-rate
+  fiscal-control-rate
+  public-invest-rate
+  investment-multiplier
+  investment-queue
+  bce-interventions
+  unemployment-rate
+  max-bce-interventions
+  austerity-mode?
+  fiscal-status
+]
+
+breed [citizens citizen]
+breed [companies company]
+
+citizens-own [
+  income
+  is-evader
+  age
+  pensioner?
+  skill
+  is-deterred?
+  employed?
+]
+
+companies-own [
+  size
+]
+
+
+to setup
+  clear-all
+
+  set cumulative-born 0
+  set cumulative-bankrupt 0
+
+  set base-birth-rate 1.0
+  set base-death-rate 1.0
+
+  set fiscal-control-rate 15
+  set max-bce-interventions 5
+  set bce-interventions 0
+  set austerity-mode? false
+  set fiscal-status "Normal"
+
+  set investment-multiplier 1.5
+
+  set investment-queue []
+
+  apply-scenario
+  setup-citizens
+  setup-companies
+  calculate-gdp
+  calculate-debt
+  calculate-gini
+  calculate-public-quality
+  reset-ticks
+end
+
+to scenario-pension-crisis
+  set birth-rate 0.5
+  set immigration-rate 0.5
+  set death-rate 0.5
+  set welfare-budget 40
+  set interest-rate 3
+  set citizen-tax-rate 20
+  set company-tax-rate 20
+  set probability-of-tax-evasion 30
+  set pension-tax-rate 15
+end
+
+to scenario-economic-expansion
+  set birth-rate 2
+  set immigration-rate 3
+  set death-rate 1
+  set welfare-budget 35
+  set interest-rate 1
+  set citizen-tax-rate 15
+  set company-tax-rate 20
+  set probability-of-tax-evasion 10
+  set pension-tax-rate 10
+end
+
+to scenario-fiscal-austerity
+  set birth-rate 1
+  set immigration-rate 0.5
+  set death-rate 1
+  set welfare-budget 15
+  set interest-rate 2
+  set citizen-tax-rate 35
+  set company-tax-rate 30
+  set probability-of-tax-evasion 25
+  set pension-tax-rate 15
+end
+
+to scenario-financial-crisis
+  set birth-rate 0.8
+  set immigration-rate 0.3
+  set death-rate 1.5
+  set welfare-budget 10
+  set interest-rate 6
+  set citizen-tax-rate 40
+  set company-tax-rate 35
+  set probability-of-tax-evasion 40
+  set pension-tax-rate 20
+  set debt 200000
+end
+
+to apply-scenario
+  if scenario-choice = "Pension Crisis"       [ scenario-pension-crisis ]
+  if scenario-choice = "Economic Expansion"   [ scenario-economic-expansion ]
+  if scenario-choice = "Fiscal Austerity"     [ scenario-fiscal-austerity ]
+  if scenario-choice = "Financial Crisis"     [ scenario-financial-crisis ]
+end
+
+to setup-citizens
+  create-citizens population-size [
+    setxy random-xcor random-ycor
+    set age random 80
+    set pensioner? age >= retirement-age
+    set skill random-normal 10 3
+    set income pareto-income 500 1.1
+    set is-evader (random-float 100 < probability-of-tax-evasion)
+    set is-deterred? false
+    set employed? false
+    set shape "person"
+
+    if pensioner? [ set color gray ]
+    if not pensioner? [ set color blue ]
+  ]
+end
+
+to setup-companies
+  let largest-company-size 100000
+  let rank 1
+  create-companies company-count [
+    setxy random-xcor random-ycor
+    set size (largest-company-size / rank)
+    set shape "house"
+    set color green
+    set rank (rank + 1)
+  ]
+end
+
+
+
+to-report pareto-income [xm alpha]
+  report xm / ((random-float 1) ^ (1 / alpha))
+end
+
+to go
+  if not any? citizens [ stop ]
+
+  distribute-pensions
+  economy-step
+  unemployment-management
+  dynamic-birth-death
+  demographics-step
+  grow-companies
+  calculate-sustainable-growth
+  release-investments
+  calculate-gdp
+  calculate-pension-debt
+  calculate-debt
+  check-debt-sustainability
+  calculate-gini
+  calculate-public-quality
+  maybe-create-companies
+  maybe-bankrupt-companies
+  contagion-evasion
+  dynamic-checks
+  evasion-control
+  automatic-fiscal-policy
+  central-bank-intervention
+  apply-austerity-measures
+
+  if bce-interventions >= max-bce-interventions and debt-to-gdp >= 2 [
+    user-message "THE STATE HAS DEFAULTED. THE ECONOMY HAS COLLAPSED."
+    stop
+  ]
+
+  tick
+end
+
+
+to grow-companies
+  ask companies [
+    if sustainable-growth > 0 [
+      ;; Crescita proporzionale a sustainable-growth
+      set size (size * (1 + sustainable-growth / 10))
+    ]
+  ]
+end
+
+
+to dynamic-birth-death
+  let avg-income mean [income] of citizens
+
+  ifelse (public-quality > 0.5 and avg-income > 1000)
+  [
+    set birth-rate 2.0
+    set death-rate 0.8
+  ]
+  [
+    ifelse (public-quality < 0.2 and avg-income < 500)
+    [
+      set birth-rate 0.5
+      set death-rate 2.0
+    ]
+    [
+      set birth-rate 1.0
+      set death-rate 1.0
+    ]
+  ]
+end
+
+
+to demographics-step
+  ask citizens [
+    set age (age + 1)
+
+
+    if age >= retirement-age [
+      set pensioner? true
+      set color gray
+    ]
+
+
+    let age-threshold (max-age - 10)
+    let base-death? (random-float 100 < death-rate)
+    let high-death? false
+
+    if age > age-threshold [
+      let new-rate (death-rate * 2)
+      set high-death? (random-float 100 < new-rate)
+    ]
+
+    if (base-death? or high-death? or (age > max-age)) [
+      die
+    ]
+  ]
+
+
+  create-citizens round(count citizens * birth-rate / 100) [
+    setxy random-xcor random-ycor
+    set income 0
+    set skill random-normal 10 3
+    set is-evader (random-float 100 < probability-of-tax-evasion)
+    set is-deterred? false
+    set age 0
+    set pensioner? false
+    set shape "person"
+    set color white
+  ]
+
+
+  create-citizens round(count citizens * immigration-rate / 100) [
+    setxy random-xcor random-ycor
+    set skill random-normal 10 3
+    set income pareto-income 600 1.3
+    set is-evader (random-float 100 < probability-of-tax-evasion)
+    set is-deterred? false
+    set age random 50
+    set pensioner? (age >= retirement-age)
+    set shape "person"
+    set color yellow
+  ]
+end
+
+
+
+
+to economy-step
+  ask citizens [
+  let tax-due (income * citizen-tax-rate / 100)
+  if (is-evader and not is-deterred? and random-float 1 < 0.05) [
+
+  ]
+
+]
+
+
+  ask companies [
+    let company-tax (size * company-tax-rate / 100)
+  ]
+end
+
+to unemployment-management
+  let adults citizens with [age >= 18 and age < retirement-age]
+
+  ask adults [
+
+    ifelse (random-float 1 < 0.2) [
+      set employed? false
+      set income 200
+      set color red
+    ] [
+      set employed? true
+      let base-sal pareto-income 500 1.5
+      set income (base-sal * (skill / 10))
+      set color green
+    ]
+  ]
+
+  let active (count adults)
+  let unemployed (count adults with [not employed?])
+  if active > 0 [
+    set unemployment-rate (unemployed / active)
+  ]
+  if active = 0 [
+    set unemployment-rate 0
+  ]
+end
+
+to calculate-gdp
+  set gdp (sum [income] of citizens + sum [size] of companies)
+end
+
+to calculate-pension-debt
+  let pensioners count citizens with [pensioner?]
+  let workers count citizens with [age >= 18 and age < 65]
+  if workers > 0 [
+    let avg-worker-income mean [income] of citizens with [age >= 18 and age < 65]
+    let avg-pension (avg-worker-income * 0.6)
+    set pension-debt (pensioners * avg-pension)
+  ]
+  if workers = 0 [
+    set pension-debt (pensioners * 500)
+  ]
+end
+
+to calculate-debt
+
+  let labor-tax (sum [income] of citizens with [not pensioner?]) * (citizen-tax-rate / 100)
+  let pension-tax (sum [income] of citizens with [pensioner?]) * (pension-tax-rate / 100)
+  let company-tax (sum [size] of companies) * (company-tax-rate / 100)
+  let total-tax (labor-tax + pension-tax + company-tax)
+
+  let welfare-expenditure (gdp * welfare-budget / 100)
+  let pension-expenditure (sum [income] of citizens with [pensioner?])
+
+  let total-spending (welfare-expenditure + pension-expenditure)
+
+  let deficit (total-spending - total-tax)
+
+  set debt (debt + deficit)
+
+  ifelse (gdp > 0) [
+    set debt-to-gdp (debt / gdp)
+  ] [
+    set debt-to-gdp 0
+  ]
+end
+
+
+to distribute-pensions
+  let workers citizens with [age >= 18 and age < retirement-age]
+  let pensioners citizens with [pensioner?]
+
+  if any? workers [
+    let avg-worker-income mean [income] of workers
+    let avg-pension (avg-worker-income * pension-replacement-rate)
+    ask pensioners [
+      set income avg-pension
+    ]
+  ]
+  if not any? workers [
+    ask pensioners [
+      set income 500
+    ]
+  ]
+end
+
+to check-debt-sustainability
+  if (debt-to-gdp >= 0.9) [
+    set welfare-budget max list (welfare-budget - 5) 5
+  ]
+end
+
+to do-public-investment
+  let invest-amount ((public-invest-rate / 100) * gdp)
+  if (invest-amount > 0) [
+    let chunk (invest-amount / 3)
+    set investment-queue fput chunk fput chunk fput chunk investment-queue
+    set debt (debt + invest-amount)
+  ]
+end
+
+to release-investments
+  if not empty? investment-queue [
+    let part first investment-queue
+    set investment-queue but-first investment-queue
+    let added-gdp (part * investment-multiplier)
+    set gdp (gdp + added-gdp)
+  ]
+end
+
+to calculate-sustainable-growth
+  let ideal-investment 25
+  let growth-factor (welfare-budget / ideal-investment)
+  let real-growth ((growth-factor - 1) * 0.5)
+
+  let nominal-growth ((real-growth / 100) + (inflation / 100))
+  if (nominal-growth < -0.3) [ set nominal-growth -0.3 ]
+  if (nominal-growth >  0.5) [ set nominal-growth  0.5 ]
+
+  set gdp (gdp * (1 + nominal-growth))
+end
+
+to calculate-gini
+  let sorted-incomes sort [income] of citizens
+  let n length sorted-incomes
+  if (n = 0) [
+    set gini 0
+    stop
+  ]
+  let total-income sum sorted-incomes
+  let cum 0
+  let b 0
+  let i 0
+  foreach sorted-incomes [ val ->
+    set cum (cum + val)
+    set i (i + 1)
+    set b (b + (cum / total-income))
+  ]
+  set gini (1 + (1 / n) - 2 * (b / n))
+end
+
+to calculate-public-quality
+  let ideal-budget 30
+  set public-quality (
+    (welfare-budget / ideal-budget)
+    - (max list (debt-to-gdp - 1.2) 0 / 20)
+    - ((count citizens with [is-evader] / count citizens) / 15)
+  )
+  set public-quality max list (min list public-quality 1) 0
+end
+
+
+to maybe-create-companies
+  set companies-born 0
+  let probability-growth ifelse-value ((count companies < 30) or (sustainable-growth > -1)) [0.4] [0.1]
+  if (random-float 1 < probability-growth) [
+    create-companies 1 [
+      setxy random-xcor random-ycor
+      set size random-normal 200 20
+      set shape "house"
+      set color green
+    ]
+    set companies-born (companies-born + 1)
+    set cumulative-born (cumulative-born + 1)
+  ]
+end
+
+to maybe-bankrupt-companies
+  set companies-bankrupt 0
+  ask companies [
+    let fail-probability ifelse-value (sustainable-growth < -1) [0.03] [0.005]
+    if (random-float 1 < fail-probability) [
+      set companies-bankrupt (companies-bankrupt + 1)
+      set cumulative-bankrupt (cumulative-bankrupt + 1)
+      die
+    ]
+  ]
+end
+
+to contagion-evasion
+  let fraction-evaders ((count citizens with [is-evader]) / (count citizens))
+  ask citizens with [not is-evader and not is-deterred?] [
+    let neighbors-evaders 0
+    let north (citizens-at 0 -1) with [is-evader]
+    let south (citizens-at 0 1)  with [is-evader]
+    let east  (citizens-at 1 0)  with [is-evader]
+    let west  (citizens-at -1 0) with [is-evader]
+    set neighbors-evaders ((count north) + (count south) + (count east) + (count west))
+    if (random-float 100 < (fraction-evaders * 10 + neighbors-evaders * 5)) [
+      set is-evader true
+      set color red
+    ]
+  ]
+end
+
+to dynamic-checks
+  let fraction-evaders ((count citizens with [is-evader]) / (count citizens))
+  set fiscal-control-rate (15 + fraction-evaders * 40)
+  if (fiscal-control-rate > 100) [ set fiscal-control-rate 100 ]
+end
+
+to evasion-control
+  ask citizens with [is-evader and not is-deterred?] [
+    if (random-float 100 < fiscal-control-rate) [
+      set debt (debt + (income * 0.5 + 2000))
+      set is-evader false
+      set is-deterred? true
+      set color blue
+
+
+      let north (citizens-at 0 -1)
+      let south (citizens-at 0 1)
+      let east  (citizens-at 1 0)
+      let west  (citizens-at -1 0)
+      let all-neighbors (turtle-set north south east west)
+      ask all-neighbors [
+        if is-evader [
+          if (random-float 1 < 0.3) [
+            set is-evader false
+            set color blue
+          ]
+        ]
+      ]
+    ]
+  ]
+end
+
+
+to central-bank-intervention
+  if debt-to-gdp >= 1.2 and bce-interventions < max-bce-interventions [
+    let new-rate interest-rate - 0.5
+    set interest-rate max list new-rate 0.5
+    set debt debt * 0.8
+    set bce-interventions bce-interventions + 1
+  ]
+
+  if bce-interventions >= max-bce-interventions and debt-to-gdp >= 1.5 and not austerity-mode? [
+    set austerity-mode? true
+    set fiscal-status "Austerity"
+  ]
+end
+
+to apply-austerity-measures
+
+  if austerity-mode? and debt-to-gdp < 0.5 [
+    set austerity-mode? false
+    set fiscal-status "Recovery"
+    ask patches [ set pcolor black ]
+  ]
+
+
+  if austerity-mode? [
+    set welfare-budget 0
+    set citizen-tax-rate min list (citizen-tax-rate + 5) 80
+    set company-tax-rate min list (company-tax-rate + 5) 80
+    set pension-tax-rate min list (pension-tax-rate + 5) 50
+    set pension-replacement-rate max list (pension-replacement-rate - 0.1) 0.3
+    set public-invest-rate 0
+
+    ask patches [ set pcolor red ]
+  ]
+end
+
+to automatic-fiscal-policy
+  if not austerity-mode? [
+    if debt-to-gdp >= 1.0 and debt-to-gdp < 1.5 [
+      set fiscal-status "Correction"
+      set citizen-tax-rate min list (citizen-tax-rate + 1) 60
+      set company-tax-rate min list (company-tax-rate + 1) 60
+      set pension-tax-rate min list (pension-tax-rate + 1) 40
+      set welfare-budget max list (welfare-budget - 1) 10
+      set pension-replacement-rate max list (pension-replacement-rate - 0.05) 0.4
+    ]
+    if debt-to-gdp < 1.0 [
+      set fiscal-status "Normal"
+      if welfare-budget < 35 [ set welfare-budget (welfare-budget + 0.5) ]
+      set citizen-tax-rate max list (citizen-tax-rate - 1) 10
+      set company-tax-rate max list (company-tax-rate - 1) 10
+      set pension-tax-rate max list (pension-tax-rate - 1) 5
+      if pension-replacement-rate < 0.7 [ set pension-replacement-rate (pension-replacement-rate + 0.05) ]
+      set public-invest-rate min list (public-invest-rate + 0.5) 5
+    ]
+    if debt-to-gdp < 0.6 [
+      if welfare-budget < 40 [ set welfare-budget (welfare-budget + 0.5) ]
+      if pension-replacement-rate < 0.8 [ set pension-replacement-rate (pension-replacement-rate + 0.05) ]
+    ]
+  ]
+end
+
+
+
+
+to set-optimal-values
+  set population-size 1000
+  set company-count 150
+  set citizen-tax-rate 20
+  set company-tax-rate 20
+  set probability-of-tax-evasion 15
+  set birth-rate 1.0
+  set death-rate 1.0
+  set immigration-rate 2.0
+  set interest-rate 2.0
+  set welfare-budget 30
+  set fiscal-control-rate 25
+  set pension-tax-rate 10
+  set public-invest-rate 3
+  set investment-multiplier 1.5
+  set pension-replacement-rate 0.6
+  set retirement-age 67
+  set max-age 85
+  set scenario-choice "None"
+end
+
+to debug-iniziale
+  let labor-tax (sum [income] of citizens with [not pensioner?]) * (citizen-tax-rate / 100)
+  let pension-tax (sum [income] of citizens with [pensioner?]) * (pension-tax-rate / 100)
+  let company-tax (sum [size] of companies) * (company-tax-rate / 100)
+  let total-tax (labor-tax + pension-tax + company-tax)
+
+  let welfare-expenditure (gdp * welfare-budget / 100)
+  let pension-expenditure sum [income] of citizens with [pensioner?]
+  let total-spending (welfare-expenditure + pension-expenditure)
+
+  let initial-debt debt
+  let deficit (total-spending - total-tax)
+
+  print "--- DEBUG INIZIALE ---"
+  print (word "Citizen tax revenue: " round labor-tax)
+  print (word "Pension tax revenue: " round pension-tax)
+  print (word "Company tax revenue: " round company-tax)
+  print (word "TOTAL tax revenue: " round total-tax)
+  print (word "Welfare spending: " round welfare-expenditure)
+  print (word "Pension spending: " round pension-expenditure)
+  print (word "TOTAL spending: " round total-spending)
+  print (word "DEFICIT: " round deficit)
+  print (word "Debt before: " round initial-debt)
+  print (word "Expected debt after tick: " round (initial-debt + deficit))
+  print (word "GDP: " round gdp)
+  print (word "Debt-to-GDP: " precision (debt / gdp) 2)
+  print "------------------------"
+end
+
+
+to debug-lavoratori
+  let tot-lavoratori count citizens with [age >= 18 and age < retirement-age]
+  let impiegati count citizens with [employed? and age >= 18 and age < retirement-age]
+  let disoccupati (tot-lavoratori - impiegati)
+
+  let deterred-lavoratori count citizens with [is-deterred? and employed? and age >= 18 and age < retirement-age]
+  let evaders-lavoratori count citizens with [is-evader and employed? and age >= 18 and age < retirement-age]
+
+  print (word "Tot. lavoratori (18+): " tot-lavoratori)
+  print (word "Impiegati: " impiegati)
+  print (word "Disoccupati: " disoccupati)
+  print (word "Lavoratori beccati (deterred): " deterred-lavoratori)
+  print (word "Lavoratori evasori: " evaders-lavoratori)
+end
