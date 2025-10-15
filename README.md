@@ -132,3 +132,35 @@ ProjectBEC.nlogo          # File principale
 docs/                     # Documentazione e immagini
 README.md                 # Questo file
 LICENSE                   # Licenza MIT
+
+---
+
+## 9. Citazione
+
+Giuseppe Lombardia (2025). ProjectBEC – Un modello ad agenti delle dinamiche fiscali, economiche e sociali.
+Dipartimento di Matematica e Informatica (DMI), Università di Catania.
+GitHub: https://github.com//ProjectBEC
+
+---
+
+## 10. Licenza
+
+Questo progetto è distribuito con **Licenza MIT**.  
+Può essere usato, modificato e condiviso liberamente per scopi didattici e di ricerca, citando l’autore.
+
+---
+
+## 11. Parole Chiave
+
+Modellazione ad agenti · NetLogo · Politiche pubbliche · Dinamiche fiscali ·  
+Macroeconomia · Disuguaglianza · Sostenibilità del debito · Sistemi complessi
+
+---
+
+## 12. Sviluppi Futuri
+
+Sviluppi previsti:
+- Differenziazione settoriale delle imprese  
+- Meccanismi di incontro domanda-offerta sul mercato del lavoro  
+- Adattamento comportamentale basato su apprendimento  
+- Calibrazione con dati reali per analisi comparate
